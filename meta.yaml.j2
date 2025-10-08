@@ -39,8 +39,6 @@ test:
     {% for dep in optional.get('dev', []) %}
     - "{{ dep }}"
     {% endfor %}
-  commands:
-    - python -m pytest
 
 about:
   home: "{{ urls.get('Homepage', '') }}"
