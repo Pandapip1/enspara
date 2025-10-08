@@ -86,7 +86,7 @@ jobs:
       - name: Install from built wheel
         run: |
           source .venv/bin/activate
-          pip install --find-links=./dist enspara[dev, mpi]
+          pip install --find-links=./dist "enspara[dev, mpi]"
 
       - name: pytest (no MPI)
         run: |
