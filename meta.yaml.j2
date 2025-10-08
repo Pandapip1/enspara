@@ -24,7 +24,6 @@ requirements:
     - conda-forge
   host:
     - "{{ python_dependency }}"
-    - build
     {% for dep in build %}
     - "{{ dep }}"
     {% endfor %}
