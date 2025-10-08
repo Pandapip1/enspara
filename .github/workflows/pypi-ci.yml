@@ -1,0 +1,105 @@
+name: PyPI Continuous Integration
+
+on:
+  push:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  build-wheel:
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package dev dependencies
+        run: pip install .[dev]
+
+      - name: Build
+        id: pypi-build
+        run: cibuildwheel --output-dir dist
+
+      - name: Upload built wheels
+        if: ${{ always() && steps.pypi-build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: dist/*.whl
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+    needs: build-wheel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download built wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: dist
+
+      - name: Install Dependencies (Linux)
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt install -y libmpich12 libmpich-dev build-essential ca-certificates
+
+      - name: Install Dependencies (macOS)
+        if: ${{ matrix.os == 'macos-latest' }}
+        run: |
+          set -eux
+          brew install mpich
+
+      - name: Install from built wheel
+        run: |
+          set -eux
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install dist/*.whl
+
+      - name: pytest (no MPI)
+        run: |
+          source .venv/bin/activate
+          set -eux
+          python -m pytest
+
+      - name: pytest (MPI)
+        run: |
+          source .venv/bin/activate
+          set -eux
+          mpirun -n 2 python -m pytest -m 'mpi'

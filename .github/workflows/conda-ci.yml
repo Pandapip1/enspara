@@ -1,0 +1,140 @@
+name: Conda Continuous Integration
+
+on:
+  push:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  build-conda:
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Micromamba
+        uses: mamba-org/setup-micromamba@v2.0.5
+        with:
+          environment-name: cb-env
+          create-args: >-
+            python=${{ matrix.python-version }}
+            pip
+            python-build
+            twine
+            conda-build
+            anaconda-client
+          condarc: |
+            channel_priority: strict
+            channels:
+              - conda-forge
+              - defaults
+              - bioconda
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Install package
+        run: |
+          set -eux
+          eval "$(micromamba shell hook --shell=bash)"
+          micromamba activate cb-env
+          pip install .[dev]
+
+      - name: Generate Conda metadata
+        id: conda-meta
+        run: |
+          set -eux
+          eval "$(micromamba shell hook --shell=bash)"
+          micromamba activate cb-env
+          ./gen_meta.py
+
+      - name: Build (Conda)
+        if: ${{ steps.conda-meta.outcome == 'success' }}
+        id: conda-build
+        run: |
+          set -eux
+          eval "$(micromamba shell hook --shell=bash)"
+          micromamba activate cb-env
+          path=$(conda-build . --output)
+          conda-build .
+          echo "path=$path" >> $GITHUB_OUTPUT
+
+      - name: Upload built conda package
+        if: ${{ always() && steps.conda-build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: conda-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: ${{ steps.conda-build.outputs.path }}
+
+  test-conda:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+        python-version:
+          - "3.13"
+    needs: build-conda
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Micromamba
+        uses: mamba-org/setup-micromamba@v2.0.5
+        with:
+          environment-name: cb-env
+          create-args: >-
+            python=${{ matrix.python-version }}
+            pip
+            python-build
+            twine
+            conda-build
+            anaconda-client
+          condarc: |
+            channel_priority: strict
+            channels:
+              - conda-forge
+              - defaults
+              - bioconda
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Download built conda artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: conda-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: dist
+
+      - name: Install conda package
+        run: |
+          set -eux
+          eval "$(micromamba shell hook --shell=bash)"
+          micromamba activate cb-env
+          micromamba install -c local -y *.tar.bz2
+
+      - name: pytest (no MPI)
+        run: |
+          set -eux
+          eval "$(micromamba shell hook --shell=bash)"
+          micromamba activate cb-env
+          python -m pytest
+
+      - name: pytest (MPI)
+        run: |
+          set -eux
+          eval "$(micromamba shell hook --shell=bash)"
+          micromamba activate cb-env
+          mpirun -n 2 python -m pytest -m 'mpi'

@@ -56,9 +56,7 @@ jobs:
       id: pypi-build
       run: |
         set -eux
-        eval "$(micromamba shell hook --shell=bash)"
-        micromamba activate cb-env
-        python -m build .
+        cibuildwheel --output-dir dist
 
     - name: Publish (PyPI)
       shell: bash

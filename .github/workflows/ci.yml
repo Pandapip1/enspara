@@ -17,11 +17,8 @@ defaults:
     shell: bash -l {0}
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
+  build-wheel:
     strategy:
-      fail-fast: false
-
       matrix:
         os:
           - macos-latest
@@ -30,57 +27,8 @@ jobs:
           - "3.11"
           - "3.12"
           - "3.13"
-  
-    steps:
-    - uses: actions/checkout@v4
-
-    - uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install Dependencies (Linux)
-      if: ${{ matrix.os == 'ubuntu-latest' }}
-      run: |
-        set -eux
-        sudo apt-get update
-        sudo apt install libmpich12 libmpich-dev build-essential ca-certificates
-    
-    - name: Install Dependencies (Darwin)
-      if: ${{ matrix.os == 'macos-latest' }}
-      run: |
-        set -eux
-        brew install mpich
-
-    - name: Build and install package
-      run: |
-        set -eux
-        python -m venv .venv
-        source .venv/bin/activate
-        python -m pip install -e .[dev,docs,mpi]
-
-    - name: pytest (no MPI)
-      if: always()
-      run: |
-        source .venv/bin/activate
-        set -eux
-        python -m pytest
-    
-    - name: pytest (MPI)
-      if: always()
-      run: |
-        source .venv/bin/activate
-        set -eux
-        mpirun -n 2 python -m pytest -m 'mpi'
-  test-conda:
-    runs-on: ${{ matrix.os }}
-    strategy:
       fail-fast: false
-
-      matrix:
-        os:
-          - ubuntu-latest
-        python-version:
-          - "3.13"
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
 
@@ -89,7 +37,7 @@ jobs:
       with:
         environment-name: cb-env
         create-args: >-
-          python=${{ matrix.python }}
+          python=${{ matrix.python-version }}
           pip
           python-build
           twine
@@ -104,8 +52,34 @@ jobs:
         cache-environment: true
         cache-downloads: true
 
+    - name: Install package
+      shell: bash
+      run: |
+        set -eux
+        eval "$(micromamba shell hook --shell=bash)"
+        micromamba activate cb-env
+        pip install .[dev]
+
+    - name: Build (PyPI)
+      shell: bash
+      if: ${{ always() }}
+      id: pypi-build
+      run: |
+        set -eux
+        eval "$(micromamba shell hook --shell=bash)"
+        micromamba activate cb-env
+        cibuildwheel --output-dir dist
+
+    - name: Upload built wheels
+      if: ${{ always() && steps.pypi-build.outcome == 'success' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: dist/*.whl
+
     - name: Generate Conda metadata
       shell: bash
+      if: ${{ always() }}
       id: conda-meta
       run: |
         set -eux
@@ -115,6 +89,7 @@ jobs:
 
     - name: Build (Conda)
       shell: bash
+      if: ${{ always() && steps.conda-meta.outcome == 'success' }}
       id: conda-build
       run: |
         set -eux
@@ -123,3 +98,135 @@ jobs:
         path=$(conda-build . --output)
         conda-build .
         echo "path=$path" >> $GITHUB_OUTPUT
+
+    - name: Upload built conda package
+      if: ${{ always() && steps.conda-build.outcome == 'success' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: conda-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: ${{ steps.conda-build.outputs.path }}
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+    needs: build-wheel
+  
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Download built wheel artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: dist
+
+    - name: Install Dependencies (Linux)
+      if: ${{ matrix.os == 'ubuntu-latest' }}
+      run: |
+        set -eux
+        sudo apt-get update
+        sudo apt install libmpich12 libmpich-dev build-essential ca-certificates
+    
+    - name: Install Dependencies (Darwin)
+      if: ${{ matrix.os == 'macos-latest' }}
+      run: |
+        set -eux
+        brew install mpich
+
+    - name: Install from built wheel
+      run: |
+        set -eux
+        python -m venv .venv
+        source .venv/bin/activate
+        pip install dist/*.whl
+
+    - name: pytest (no MPI)
+      if: always()
+      run: |
+        source .venv/bin/activate
+        set -eux
+        python -m pytest
+    
+    - name: pytest (MPI)
+      if: always()
+      run: |
+        source .venv/bin/activate
+        set -eux
+        mpirun -n 2 python -m pytest -m 'mpi'
+
+  test-conda:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+        python-version:
+          - "3.13"
+    needs: build-wheel
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Micromamba
+      uses: mamba-org/setup-micromamba@v2.0.5
+      with:
+        environment-name: cb-env
+        create-args: >-
+          python=${{ matrix.python-version }}
+          pip
+          python-build
+          twine
+          conda-build
+          anaconda-client
+        condarc: |
+          channel_priority: strict
+          channels:
+            - conda-forge
+            - defaults
+            - bioconda
+        cache-environment: true
+        cache-downloads: true
+
+    - name: Download built conda artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: conda-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: dist
+
+    - name: Install conda package
+      shell: bash
+      run: |
+        set -eux
+        eval "$(micromamba shell hook --shell=bash)"
+        micromamba activate cb-env
+        micromamba install -c local -y *.tar.bz2
+
+    - name: pytest (no MPI)
+      if: always()
+      run: |
+        set -eux
+        eval "$(micromamba shell hook --shell=bash)"
+        micromamba activate cb-env
+        python -m pytest
+    
+    - name: pytest (MPI)
+      if: always()
+      run: |
+        set -eux
+        eval "$(micromamba shell hook --shell=bash)"
+        micromamba activate cb-env
+        mpirun -n 2 python -m pytest -m 'mpi'
