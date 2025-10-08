@@ -17,11 +17,7 @@ source:
 
 build:
   noarch: python
-  script: |
-    set -ex
-    python -m build --wheel --no-isolation
-    wheel_file=$(ls dist/*.whl)
-    python -m installer "$wheel_file"
+  script: "python -m pip install .[{{ extras }}] -vv"
 
 requirements:
   channels:

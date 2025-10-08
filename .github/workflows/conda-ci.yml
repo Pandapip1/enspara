@@ -38,8 +38,6 @@ jobs:
             channel_priority: strict
             channels:
               - conda-forge
-              - defaults
-              - bioconda
           cache-environment: true
           cache-downloads: true
 
@@ -51,7 +49,7 @@ jobs:
           micromamba activate cb-env
           ./gen_meta.py
 
-      - name: Build (Conda)
+      - name: Build
         if: ${{ steps.conda-meta.outcome == 'success' }}
         id: conda-build
         run: |
@@ -94,8 +92,6 @@ jobs:
             channel_priority: strict
             channels:
               - conda-forge
-              - defaults
-              - bioconda
           cache-environment: true
           cache-downloads: true
 
