@@ -26,11 +26,9 @@ build:
 requirements:
   channels:
     - conda-forge
-    - defaults
   host:
     - "{{ python_dependency }}"
     - build
-    - installer
     {% for dep in build %}
     - "{{ dep }}"
     {% endfor %}
