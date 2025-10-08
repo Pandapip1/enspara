@@ -7,6 +7,7 @@
 {% set optional = project.get('optional-dependencies', {}) %}
 {% set extras = optional.keys() | join(',') %}
 {% set urls = project.get('urls', {}) %}
+
 package:
   name: "{{ name }}"
   version: "{{ version }}"
@@ -16,14 +17,20 @@ source:
 
 build:
   noarch: python
-  script: "python -m pip install .[{{ extras }}] -vv"
+  script: |
+    set -ex
+    python -m build --wheel --no-isolation
+    wheel_file=$(ls dist/*.whl)
+    python -m installer "$wheel_file"
 
 requirements:
   channels:
-    - defaults
     - conda-forge
+    - defaults
   host:
     - "{{ python_dependency }}"
+    - build
+    - installer
     {% for dep in build %}
     - "{{ dep }}"
     {% endfor %}
@@ -39,6 +46,8 @@ test:
     {% for dep in optional.get('dev', []) %}
     - "{{ dep }}"
     {% endfor %}
+  commands:
+    - python -m pytest
 
 about:
   home: "{{ urls.get('Homepage', '') }}"
@@ -49,4 +58,3 @@ about:
   dev_url: "{{ urls.get('Source', '') }}"
   doc_url: "{{ urls.get('Documentation', '') }}"
   doc_source_url: "{{ urls.get('Source', '') }}"
-

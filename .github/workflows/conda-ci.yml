@@ -32,9 +32,6 @@ jobs:
           environment-name: cb-env
           create-args: >-
             python=${{ matrix.python-version }}
-            pip
-            python-build
-            twine
             conda-build
             anaconda-client
           condarc: |
@@ -45,13 +42,6 @@ jobs:
               - bioconda
           cache-environment: true
           cache-downloads: true
-
-      - name: Install package
-        run: |
-          set -eux
-          eval "$(micromamba shell hook --shell=bash)"
-          micromamba activate cb-env
-          pip install .[dev]
 
       - name: Generate Conda metadata
         id: conda-meta
@@ -98,9 +88,6 @@ jobs:
           environment-name: cb-env
           create-args: >-
             python=${{ matrix.python-version }}
-            pip
-            python-build
-            twine
             conda-build
             anaconda-client
           condarc: |
@@ -123,7 +110,7 @@ jobs:
           set -eux
           eval "$(micromamba shell hook --shell=bash)"
           micromamba activate cb-env
-          micromamba install -c local -y *.tar.bz2
+          micromamba install -c local -y dist/*.tar.bz2
 
       - name: pytest (no MPI)
         run: |
